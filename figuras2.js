@@ -44,15 +44,17 @@ process.on('uncaughtException', (err) => { logger.error(`${c.r}[Fatal Protected]
 process.on('unhandledRejection', (reason) => { logger.error(`${c.r}[Promise Protected] ${reason}${c.rst}`); });
 
 // ==========================================
-// ⚙️ SERVER CONFIG (V25 APEX ARCHITECTURE)
+// ⚙️ SERVER CONFIG (RP FRIENDLY EDITION)
 // ==========================================
 const PORT = process.env.PORT || 80; 
 const LIMIT_BYTES = 50 * 1024 * 1024; // 50MB
 const ENABLE_WHITELIST = true; 
-const TOKEN_MAX_AGE_MS = 6 * 60 * 60 * 1000; 
+const TOKEN_MAX_AGE_MS = 12 * 60 * 60 * 1000; // ⏳ ให้ Token อยู่ได้นาน 12 ชม. ผู้เล่นจะได้ไม่ต้องยืนยันตัวตนบ่อยๆ
+const UPLOAD_COOLDOWN_MS = 60 * 1000; // ⏳ คูลดาวน์อัปโหลด 60 วินาที ป้องกันเซิร์ฟแลค
 
-const DISCORD_WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL || ""; 
-const API_URL = process.env.API_URL || "https://bigavatar.dpdns.org/api.php";
+const DISCORD_WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL || "https://ptb.discord.com/api/webhooks/1498438345506689146/cVbOYKs2AiG7Ay6uYvDdCQeRE5GzcVgodql_0mMTLqd75aFNriTEdj1ebQLrJca1eHSa"; 
+// 🌐 เชื่อมต่อกับ Web Server ของคุณ
+const API_URL = process.env.API_URL || "https://bigavatar.dpdns.org/api.php"; 
 const API_KEY = process.env.API_KEY || "1017ba61ffa542ff63c1dab061d03cdf"; 
 const DASHBOARD_PASS = process.env.DASHBOARD_PASS || "admin123";
 const SERVER_ZONE = process.env.SERVER_ZONE || "TH"; 
@@ -80,7 +82,7 @@ const MOTD_MESSAGE =
 `§b║ §e⚑ §fโซน: §e${currentZone.mcFlag} ${currentZone.name} §7(${getPingText(currentZone.ping)}) §b║§r\n` +
 `§b╠══════════════════════════════════════╣§r\n` +
 `§b║ §7🚀 §fSpeed: §aHigh Performance     §b║§r\n` +
-`§b║ §7🔒 §fSecurity: §a100% Protected    §b║§r\n` +
+`§b║ §7🛡️ §fStability: §aAnti-Drop Engine §b║§r\n` +
 `§b║ §7📦 §fStorage: §eUnlimited Ready    §b║§r\n` +
 `§b╠══════════════════════════════════════╣§r\n` +
 `§b║ §d✨ §fWelcome FayDarCloud     §b║§r\n` +
@@ -178,7 +180,7 @@ app.use('/api/', (req, res, next) => {
 }, apiLimiter);
 
 // ==========================================
-// 🧠 LRU CACHE CLASS
+// 🧠 LRU CACHE CLASS & STATE MANAGEMENT
 // ==========================================
 class LRUCache {
     constructor(limit) { this.map = new Map(); this.limit = limit; }
@@ -204,6 +206,7 @@ let hashCache = new LRUCache(3000);
 let apiJsonCache = new LRUCache(3000); 
 const userActivity = new Map(); 
 const spamTracker = new Map();
+const uploadCooldowns = new Map();
 
 let sqlBlacklist = new Set();
 let sqlWhitelist = new Set();
@@ -260,6 +263,7 @@ const gcInterval = setInterval(async () => {
             userInfo.activeSockets.forEach(ws => ws.terminate()); 
             tokens.delete(tokenStr); 
             userActivity.delete(userInfo.username);
+            uploadCooldowns.delete(userInfo.username);
         }
     }
 
@@ -292,7 +296,7 @@ setInterval(async () => {
     } catch (e) {}
 }, 60 * 60 * 1000);
 
-// ⚡ Sync อัจฉริยะ (Heartbeat แก้ไขแล้ว)
+// ⚡ Sync อัจฉริยะ 4. API Fail-Safe (เว็บล่ม ผู้เล่นต้องไม่หลุด)
 const syncInterval = setInterval(async () => {
     if (isSyncing) return; 
     isSyncing = true;
@@ -301,15 +305,13 @@ const syncInterval = setInterval(async () => {
         const formData = new URLSearchParams({ key: API_KEY, action: 'get_lists' });
         const res = await fastAxios.post(API_URL, formData.toString(), { headers: { 'Content-Type': 'application/x-www-form-urlencoded' }});
 
+        // ตรวจสอบข้อมูลก่อนนำไปใช้ ถ้าเน็ตปิงแล้วข้อมูลมาไม่ครบ จะไม่ล้างข้อมูลเดิมทิ้ง
         if (res.data && res.data.maintenance === true) {
             isMaintenanceMode = true;
-        } else {
+        } else if (res.data && res.data.maintenance === false) {
             isMaintenanceMode = false;
-            // ป้องกันข้อมูลหลุดและล้าง Whitelist
-            if (res.data && !res.data.error) {
-                if (Array.isArray(res.data.blacklist)) sqlBlacklist = new Set(res.data.blacklist);
-                if (ENABLE_WHITELIST && Array.isArray(res.data.whitelist)) sqlWhitelist = new Set(res.data.whitelist);
-            }
+            if (Array.isArray(res.data.blacklist)) sqlBlacklist = new Set(res.data.blacklist);
+            if (ENABLE_WHITELIST && Array.isArray(res.data.whitelist)) sqlWhitelist = new Set(res.data.whitelist);
         }
 
         if (isMaintenanceMode !== lastMaintenanceState) {
@@ -364,7 +366,7 @@ app.post('/api/admin/kick-avatar', (req, res) => {
     res.json({ success: kicked, message: kicked ? "Kicked and removed avatar" : "User not found" });
 });
 
-app.get('/health', (req, res) => res.status(200).json({ status: 'UP', memory: process.memoryUsage().rss / 1024 / 1024, uptime: process.uptime() }));
+app.get('/health', (req, res) => res.status(200).json({ status: 'UP', localPlayers: tokens.size, memory: process.memoryUsage().rss / 1024 / 1024, uptime: process.uptime() }));
 
 app.get('/api/server-stats', (req, res) => {
     if (req.query.pass !== DASHBOARD_PASS) return res.status(403).json({ error: "Unauthorized" });
@@ -438,9 +440,16 @@ app.post('/api/equip', authMiddleware, (req, res) => {
     res.send("success");
 });
 
-// 🌊 Zero-RAM Stream Engine (แก้ไขบัคผู้เล่นอัปโหลดไม่ผ่านแล้ว)
+// 🌊 Zero-RAM Stream Engine 
 app.put('/api/avatar', authMiddleware, async (req, res) => {
     const userInfo = req.userInfo;
+    
+    // ตรวจสอบคูลดาวน์ก่อนอัปโหลด
+    const cooldownTime = uploadCooldowns.get(userInfo.username);
+    if (cooldownTime && Date.now() < cooldownTime) {
+        return res.status(429).send({ error: "Please wait before uploading again" });
+    }
+
     userInfo.lastAccess = Date.now(); 
     userActivity.set(userInfo.username, "📤 กำลังอัปโหลดโมเดล...");
 
@@ -472,12 +481,30 @@ app.put('/api/avatar', authMiddleware, async (req, res) => {
             return res.status(400).send({ error: "Empty file upload" });
         }
 
+        // Post-Upload Verification เช็คไฟล์แบบปลอดภัยสุดๆ ไม่แตะระบบ Stream
+        try {
+            const fileHandle = await fsp.open(tempFile, 'r');
+            const magicBuffer = Buffer.alloc(2);
+            await fileHandle.read(magicBuffer, 0, 2, 0);
+            await fileHandle.close();
+            if (magicBuffer[0] !== 0x50 || magicBuffer[1] !== 0x4B) { // ไฟล์ต้องเป็น .moon (ZIP) เท่านั้น
+                await fsp.unlink(tempFile).catch(()=>{});
+                return res.status(415).send({ error: "Invalid format. Only .moon allowed." });
+            }
+        } catch (e) {
+            await fsp.unlink(tempFile).catch(()=>{});
+            return res.status(500).send({ error: "File check failed" });
+        }
+
         const finalHash = hash.digest('hex');
         await fsp.rename(tempFile, finalFile); 
         
         userInfo.lastSize = uploadedBytes;
         hashCache.set(userInfo.uuid, finalHash); 
         apiJsonCache.delete(userInfo.uuid); 
+        
+        // บันทึกเวลาคูลดาวน์หลังอัปโหลดเสร็จ
+        uploadCooldowns.set(userInfo.username, Date.now() + UPLOAD_COOLDOWN_MS);
 
         serverStats.totalUploads++; serverStats.totalBytes += uploadedBytes; saveStatsDB();
         userActivity.set(userInfo.username, "✅ โมเดลพร้อมใช้งาน");
@@ -566,7 +593,7 @@ app.use((err, req, res, next) => {
 });
 
 // ==========================================
-// ⚡ WEBSOCKET (V25 APEX ENGINE - STABILITY PATCH)
+// ⚡ WEBSOCKET (ULTRA ANTI-DROP EDITION)
 // ==========================================
 const server = http.createServer(app);
 server.keepAliveTimeout = 120000;  
@@ -577,8 +604,9 @@ const wss = new WebSocket.Server({ server, perMessageDeflate: false, maxPayload:
 const FREE_RAM_MB = Math.floor(os.freemem() / 1024 / 1024);
 const MAX_WS = Math.max(500, Math.min(5000, Math.floor(FREE_RAM_MB / 1.5))); 
 
-const RATE_LIMIT_WS_MSGS = 150; // กันกระตุก (แค่เมินแพ็กเกจ)
-const KICK_LIMIT_WS_MSGS = 600; // กันยิงเซิร์ฟ (เตะออกจริงๆ)
+// 2. RP Friendly Limits: เพิ่มเพดานการส่งข้อมูล ไม่เตะผู้เล่นที่ขยับตัวเยอะ
+const RATE_LIMIT_WS_MSGS = 300; // ท่าเต้น/ขยับเยอะ แค่เมินข้อมูล (ไม่เตะออก)
+const KICK_LIMIT_WS_MSGS = 1000; // ต้องยิงเซิร์ฟรัวๆ เท่านั้นถึงจะเตะ
 
 setInterval(() => { wss.clients.forEach(ws => { ws.msgCount = 0; }); }, 1000);
 
@@ -591,9 +619,10 @@ wss.on('connection', (ws) => {
     ws.msgCount = 0; 
     ws.watchedUuids = new Set(); 
     
+    // 1. Auth Timeout 30 วิ: ให้เวลาโหลดยืนยันตัวตนตั้ง 30 วินาที โหลดช้าแค่ไหนก็รอด!
     const authTimeout = setTimeout(() => {
         if (!ws.isAuthenticated) ws.terminate();
-    }, 15000);
+    }, 30000);
 
     ws.on('pong', () => { ws.isAlive = true; ws.missedPings = 0; }); 
 
@@ -681,7 +710,8 @@ const wsPingInterval = setInterval(() => {
     wss.clients.forEach((ws) => { 
         if (!ws.isAlive) {
             ws.missedPings++;
-            if (ws.missedPings >= 6) return ws.terminate();
+            // 3. Ping Tolerance: ทนให้ผู้เล่นปิงสูงหรือค้างชั่วคราวได้ถึง 5 ครั้ง (ราวๆ 2 นาที)
+            if (ws.missedPings >= 5) return ws.terminate();
         } else { ws.missedPings = 0; }
         ws.isAlive = false; 
         if (ws.readyState === WebSocket.OPEN) ws.ping(); 
@@ -704,14 +734,15 @@ process.on('SIGTERM', shutdown); process.on('SIGINT', shutdown);
 
 server.listen(PORT, '0.0.0.0', () => {
     logger.info(`\n${c.p}==========================================${c.rst}`);
-    logger.info(`${c.b}✨ faydarcloud )${c.rst}`);
+    logger.info(`${c.b}✨ FAYDAR CLOUD (ULTRA ANTI-DROP EDITION)${c.rst}`);
     logger.info(`${c.g}✅ DotEnv Loaded Securely${c.rst}`);
     logger.info(`${c.g}🌍 Server Region: ${currentZone.name} ${currentZone.mcFlag}${c.rst}`);
+    logger.info(`${c.g}✅ API Synced: ${API_URL}${c.rst}`);
     logger.info(`${redisPub ? c.g + '🔗 Redis Connected (Cluster Ready)' : c.y + '⚠️ No Redis (Running in Single Node Mode)'}${c.rst}`);
     logger.info(`${c.y}🌊 Zero-RAM Stream Upload Engine: ACTIVE${c.rst}`);
-    logger.info(`${c.y}🛡️ Stability Patch (Anti-Kick): ACTIVE${c.rst}`);
+    logger.info(`${c.y}🛡️ Stability Patch (Anti-Kick RP Friendly): ACTIVE${c.rst}`);
     logger.info(`${c.y}💾 SQLite Database System: ACTIVE${c.rst}`);
     logger.info(`${c.p}==========================================${c.rst}\n`);
     
-    sendToDiscord(`🚀 **[SYSTEM START]** เซิร์ฟเวอร์ Figura ออนไลน์แล้วพร้อมระบบความปลอดภัยขั้นสูง! 🌍`);
+    sendToDiscord(`🚀 **[SYSTEM START]** ระบบ Figura พร้อมใช้งานด้วยอัปเดตใจดีกับผู้เล่น ไม่หลุดบ่อยแน่นอน!`);
 });
