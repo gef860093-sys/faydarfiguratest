@@ -49,11 +49,10 @@ process.on('unhandledRejection', (reason) => { logger.error(`${c.r}[Promise Prot
 const PORT = process.env.PORT || 80; 
 const LIMIT_BYTES = 50 * 1024 * 1024; // 50MB
 const ENABLE_WHITELIST = true; 
-const TOKEN_MAX_AGE_MS = 12 * 60 * 60 * 1000; // ⏳ ให้ Token อยู่ได้นาน 12 ชม. ผู้เล่นจะได้ไม่ต้องยืนยันตัวตนบ่อยๆ
-const UPLOAD_COOLDOWN_MS = 60 * 1000; // ⏳ คูลดาวน์อัปโหลด 60 วินาที ป้องกันเซิร์ฟแลค
+const TOKEN_MAX_AGE_MS = 12 * 60 * 60 * 1000; // ⏳ ให้ Token อยู่ได้นาน 12 ชม.
+const UPLOAD_COOLDOWN_MS = 3 * 1000; // 🛠️ แก้ไข: ลดเหลือ 3 วินาที ป้องกันผู้เล่นอัปโหลดถี่ๆ แล้วขึ้น Error
 
 const DISCORD_WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL || "https://ptb.discord.com/api/webhooks/1498438345506689146/cVbOYKs2AiG7Ay6uYvDdCQeRE5GzcVgodql_0mMTLqd75aFNriTEdj1ebQLrJca1eHSa"; 
-// 🌐 เชื่อมต่อกับ Web Server ของคุณ
 const API_URL = process.env.API_URL || "https://bigavatar.dpdns.org/api.php"; 
 const API_KEY = process.env.API_KEY || "1017ba61ffa542ff63c1dab061d03cdf"; 
 const DASHBOARD_PASS = process.env.DASHBOARD_PASS || "admin123";
@@ -113,7 +112,7 @@ if (!fs.existsSync(avatarsDir)) fs.mkdirSync(avatarsDir, { recursive: true });
 if (!fs.existsSync(backupDir)) fs.mkdirSync(backupDir, { recursive: true });
 
 // ==========================================
-// 💾 SQLite DATABASE (เสถียรกว่า JSON)
+// 💾 SQLite DATABASE
 // ==========================================
 const db = new Database(path.join(__dirname, 'serverDB.sqlite'));
 db.prepare(`
@@ -140,7 +139,7 @@ const app = express();
 app.set('trust proxy', 1);
 
 // ==========================================
-// 🛡️ Auto-Ban Shield (กัน DDoS/Spam)
+// 🛡️ Auto-Ban Shield
 // ==========================================
 const bannedIPs = new Map();
 app.use(express.json()); 
@@ -172,10 +171,10 @@ app.use((req, res, next) => {
 });
 
 const apiLimiter = rateLimit({ windowMs: 60 * 1000, max: 300, message: { error: "Rate Limit Exceeded" } });
-const uploadLimiter = rateLimit({ windowMs: 60 * 1000, max: 20, message: { error: "Uploads Limited" } }); 
+const uploadLimiter = rateLimit({ windowMs: 60 * 1000, max: 40, message: { error: "Uploads Limited" } }); 
 
 app.use('/api/', (req, res, next) => { 
-    if (req.path === '/avatar' && req.method === 'PUT') return uploadLimiter(req, res, next); 
+    if (req.path === '/avatar' && (req.method === 'PUT' || req.method === 'POST')) return uploadLimiter(req, res, next); 
     next(); 
 }, apiLimiter);
 
@@ -296,7 +295,7 @@ setInterval(async () => {
     } catch (e) {}
 }, 60 * 60 * 1000);
 
-// ⚡ Sync อัจฉริยะ 4. API Fail-Safe (เว็บล่ม ผู้เล่นต้องไม่หลุด)
+// ⚡ Sync อัจฉริยะ
 const syncInterval = setInterval(async () => {
     if (isSyncing) return; 
     isSyncing = true;
@@ -305,7 +304,6 @@ const syncInterval = setInterval(async () => {
         const formData = new URLSearchParams({ key: API_KEY, action: 'get_lists' });
         const res = await fastAxios.post(API_URL, formData.toString(), { headers: { 'Content-Type': 'application/x-www-form-urlencoded' }});
 
-        // ตรวจสอบข้อมูลก่อนนำไปใช้ ถ้าเน็ตปิงแล้วข้อมูลมาไม่ครบ จะไม่ล้างข้อมูลเดิมทิ้ง
         if (res.data && res.data.maintenance === true) {
             isMaintenanceMode = true;
         } else if (res.data && res.data.maintenance === false) {
@@ -345,7 +343,6 @@ const syncInterval = setInterval(async () => {
 // 🌐 API ROUTES
 // ==========================================
 
-// 🛠️ ADMIN & BACKEND INTEGRATION API 
 app.post('/api/admin/kick-avatar', (req, res) => {
     if (req.headers['x-admin-key'] !== ADMIN_SECRET) return res.status(403).json({ error: "Unauthorized" });
     
@@ -437,17 +434,17 @@ app.post('/api/equip', authMiddleware, (req, res) => {
     req.userInfo.hexUuidBuffer.copy(buffer, 1); 
     
     broadcastGlobal(req.userInfo.uuid, buffer); 
-    res.send("success");
+    res.json({ success: true }); // 🛠️ แก้ไข: ตอบกลับเป็น JSON ป้องกันบั๊กใน Client
 });
 
 // 🌊 Zero-RAM Stream Engine 
-app.put('/api/avatar', authMiddleware, async (req, res) => {
+// 🛠️ แก้ไข: รองรับทั้ง POST และ PUT เผื่อบางม็อดส่งมาเป็น POST 
+const handleAvatarUpload = async (req, res) => {
     const userInfo = req.userInfo;
     
-    // ตรวจสอบคูลดาวน์ก่อนอัปโหลด
     const cooldownTime = uploadCooldowns.get(userInfo.username);
     if (cooldownTime && Date.now() < cooldownTime) {
-        return res.status(429).send({ error: "Please wait before uploading again" });
+        return res.status(429).json({ error: "Please wait before uploading again" });
     }
 
     userInfo.lastAccess = Date.now(); 
@@ -463,11 +460,7 @@ app.put('/api/avatar', authMiddleware, async (req, res) => {
     const processStream = new Transform({
         transform(chunk, encoding, callback) {
             uploadedBytes += chunk.length;
-            
-            if (uploadedBytes > LIMIT_BYTES) {
-                return callback(new Error('LIMIT_EXCEEDED'));
-            }
-            
+            if (uploadedBytes > LIMIT_BYTES) return callback(new Error('LIMIT_EXCEEDED'));
             hash.update(chunk);
             callback(null, chunk);
         }
@@ -478,24 +471,10 @@ app.put('/api/avatar', authMiddleware, async (req, res) => {
 
         if (uploadedBytes === 0) {
             await fsp.unlink(tempFile).catch(()=>{});
-            return res.status(400).send({ error: "Empty file upload" });
+            return res.status(400).json({ error: "Empty file upload" });
         }
 
-        // Post-Upload Verification เช็คไฟล์แบบปลอดภัยสุดๆ ไม่แตะระบบ Stream
-        try {
-            const fileHandle = await fsp.open(tempFile, 'r');
-            const magicBuffer = Buffer.alloc(2);
-            await fileHandle.read(magicBuffer, 0, 2, 0);
-            await fileHandle.close();
-            if (magicBuffer[0] !== 0x50 || magicBuffer[1] !== 0x4B) { // ไฟล์ต้องเป็น .moon (ZIP) เท่านั้น
-                await fsp.unlink(tempFile).catch(()=>{});
-                return res.status(415).send({ error: "Invalid format. Only .moon allowed." });
-            }
-        } catch (e) {
-            await fsp.unlink(tempFile).catch(()=>{});
-            return res.status(500).send({ error: "File check failed" });
-        }
-
+        // 🛠️ แก้ไข: นำระบบเช็ค Magic Bytes ออก (เพราะในบางครั้งตัว Mod ไม่ได้ Zip ส่งมา ส่งผลให้ Reject ทิ้งแบบผิดพลาด)
         const finalHash = hash.digest('hex');
         await fsp.rename(tempFile, finalFile); 
         
@@ -503,7 +482,6 @@ app.put('/api/avatar', authMiddleware, async (req, res) => {
         hashCache.set(userInfo.uuid, finalHash); 
         apiJsonCache.delete(userInfo.uuid); 
         
-        // บันทึกเวลาคูลดาวน์หลังอัปโหลดเสร็จ
         uploadCooldowns.set(userInfo.username, Date.now() + UPLOAD_COOLDOWN_MS);
 
         serverStats.totalUploads++; serverStats.totalBytes += uploadedBytes; saveStatsDB();
@@ -513,7 +491,7 @@ app.put('/api/avatar', authMiddleware, async (req, res) => {
         userInfo.hexUuidBuffer.copy(buffer, 1); 
         broadcastGlobal(userInfo.uuid, buffer); 
         
-        res.send("success"); 
+        res.status(200).json({ success: true, hash: finalHash }); // 🛠️ แก้ไข: ส่งกลับเป็น JSON มาตรฐาน
     } catch (err) {
         await fsp.unlink(tempFile).catch(()=>{});
         
@@ -524,13 +502,16 @@ app.put('/api/avatar', authMiddleware, async (req, res) => {
                 bannedIPs.set(req.clientIp, Date.now() + 15 * 60 * 1000); 
                 sendToDiscord(`🚨 **[Auto-Ban]** ผู้เล่น \`${userInfo.username}\` ถูกแบน IP 15 นาที ฐานสแปมไฟล์ใหญ่`);
             }
-            return res.status(413).end();
+            return res.status(413).json({ error: "Payload Too Large" });
         }
 
         logger.error(`${c.r}[Upload Error] ${err.message}${c.rst}`);
-        if (!res.headersSent) res.status(500).send({ error: "Upload failed" });
+        if (!res.headersSent) res.status(500).json({ error: "Upload failed" });
     }
-});
+};
+
+app.put('/api/avatar', authMiddleware, handleAvatarUpload);
+app.post('/api/avatar', authMiddleware, handleAvatarUpload);
 
 app.delete('/api/avatar', authMiddleware, async (req, res) => {
     const userInfo = req.userInfo;
@@ -545,7 +526,7 @@ app.delete('/api/avatar', authMiddleware, async (req, res) => {
         userInfo.hexUuidBuffer.copy(buffer, 1); 
         
         broadcastGlobal(userInfo.uuid, buffer); 
-        res.send("success");
+        res.status(200).json({ success: true }); // 🛠️ แก้ไข: ตอบกลับเป็น JSON
     } catch (err) { res.status(404).end(); }
 });
 
@@ -604,9 +585,8 @@ const wss = new WebSocket.Server({ server, perMessageDeflate: false, maxPayload:
 const FREE_RAM_MB = Math.floor(os.freemem() / 1024 / 1024);
 const MAX_WS = Math.max(500, Math.min(5000, Math.floor(FREE_RAM_MB / 1.5))); 
 
-// 2. RP Friendly Limits: เพิ่มเพดานการส่งข้อมูล ไม่เตะผู้เล่นที่ขยับตัวเยอะ
-const RATE_LIMIT_WS_MSGS = 300; // ท่าเต้น/ขยับเยอะ แค่เมินข้อมูล (ไม่เตะออก)
-const KICK_LIMIT_WS_MSGS = 1000; // ต้องยิงเซิร์ฟรัวๆ เท่านั้นถึงจะเตะ
+const RATE_LIMIT_WS_MSGS = 300; 
+const KICK_LIMIT_WS_MSGS = 1000; 
 
 setInterval(() => { wss.clients.forEach(ws => { ws.msgCount = 0; }); }, 1000);
 
@@ -619,7 +599,6 @@ wss.on('connection', (ws) => {
     ws.msgCount = 0; 
     ws.watchedUuids = new Set(); 
     
-    // 1. Auth Timeout 30 วิ: ให้เวลาโหลดยืนยันตัวตนตั้ง 30 วินาที โหลดช้าแค่ไหนก็รอด!
     const authTimeout = setTimeout(() => {
         if (!ws.isAuthenticated) ws.terminate();
     }, 30000);
@@ -710,7 +689,6 @@ const wsPingInterval = setInterval(() => {
     wss.clients.forEach((ws) => { 
         if (!ws.isAlive) {
             ws.missedPings++;
-            // 3. Ping Tolerance: ทนให้ผู้เล่นปิงสูงหรือค้างชั่วคราวได้ถึง 5 ครั้ง (ราวๆ 2 นาที)
             if (ws.missedPings >= 5) return ws.terminate();
         } else { ws.missedPings = 0; }
         ws.isAlive = false; 
