@@ -20,7 +20,7 @@ const Redis = require('ioredis');
 const helmet = require('helmet');
 const compression = require('compression');
 const hpp = require('hpp');
-const Database = require('better-sqlite3'); // 👈 เพิ่ม SQLite
+const Database = require('better-sqlite3'); // 👈 ใช้ SQLite เก็บข้อมูล
 
 EventEmitter.defaultMaxListeners = 15000;
 
@@ -53,10 +53,10 @@ const TOKEN_MAX_AGE_MS = 6 * 60 * 60 * 1000;
 
 const DISCORD_WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL || ""; 
 const API_URL = process.env.API_URL || "https://bigavatar.dpdns.org/api.php";
-const API_KEY = process.env.API_KEY || "1017ba61ffa542ff63c1dab061d03cdf"; 
+const API_KEY = process.env.API_KEY || "76103eb13671bab31823dc12ed97edbc"; 
 const DASHBOARD_PASS = process.env.DASHBOARD_PASS || "admin123";
 const SERVER_ZONE = process.env.SERVER_ZONE || "TH"; 
-const ADMIN_SECRET = process.env.ADMIN_SECRET || "faydar_super_secret_key"; // 👈 รหัสลับสำหรับ Game Server/Bot
+const ADMIN_SECRET = process.env.ADMIN_SECRET || "faydar_super_secret_key"; 
 
 const ZONE_INFO = {
     "TH": { webFlag: "🇹🇭", mcFlag: "[TH]", name: "Thailand", ping: "< 20 ms" },
@@ -65,9 +65,7 @@ const ZONE_INFO = {
 };
 
 const currentZone = ZONE_INFO[SERVER_ZONE] || ZONE_INFO["TH"];
-
 const formatMB = (bytes) => (bytes / 1024 / 1024).toFixed(0);
-
 const getPingText = (ping) => {
   if (ping < 20) return "§a<20 ms";
   if (ping < 50) return "§e" + ping + " ms";
@@ -143,7 +141,7 @@ app.set('trust proxy', 1);
 // 🛡️ Auto-Ban Shield (กัน DDoS/Spam)
 // ==========================================
 const bannedIPs = new Map();
-app.use(express.json()); // เพิ่มสำหรับอ่าน Body ใน Admin API
+app.use(express.json()); 
 app.use((req, res, next) => {
     const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
     if (bannedIPs.has(ip)) {
@@ -294,7 +292,7 @@ setInterval(async () => {
     } catch (e) {}
 }, 60 * 60 * 1000);
 
-// ⚡ Sync อัจฉริยะ (Heartbeat)
+// ⚡ Sync อัจฉริยะ (Heartbeat แก้ไขแล้ว)
 const syncInterval = setInterval(async () => {
     if (isSyncing) return; 
     isSyncing = true;
@@ -307,9 +305,10 @@ const syncInterval = setInterval(async () => {
             isMaintenanceMode = true;
         } else {
             isMaintenanceMode = false;
+            // ป้องกันข้อมูลหลุดและล้าง Whitelist
             if (res.data && !res.data.error) {
-                sqlBlacklist = new Set(res.data.blacklist || []);
-                if (ENABLE_WHITELIST && res.data.whitelist) sqlWhitelist = new Set(res.data.whitelist || []);
+                if (Array.isArray(res.data.blacklist)) sqlBlacklist = new Set(res.data.blacklist);
+                if (ENABLE_WHITELIST && Array.isArray(res.data.whitelist)) sqlWhitelist = new Set(res.data.whitelist);
             }
         }
 
@@ -326,7 +325,6 @@ const syncInterval = setInterval(async () => {
                 userInfo.activeSockets.forEach(ws => ws.terminate());
                 tokens.delete(tokenStr);
                 userActivity.delete(userInfo.username);
-                fsp.unlink(path.join(avatarsDir, `${userInfo.uuid}.moon`)).catch(() => {}); 
                 continue;
             }
             if (userInfo.activeSockets && userInfo.activeSockets.size > 0) {
@@ -345,7 +343,7 @@ const syncInterval = setInterval(async () => {
 // 🌐 API ROUTES
 // ==========================================
 
-// 🛠️ ADMIN & BACKEND INTEGRATION API (เพิ่มใหม่)
+// 🛠️ ADMIN & BACKEND INTEGRATION API 
 app.post('/api/admin/kick-avatar', (req, res) => {
     if (req.headers['x-admin-key'] !== ADMIN_SECRET) return res.status(403).json({ error: "Unauthorized" });
     
@@ -440,7 +438,7 @@ app.post('/api/equip', authMiddleware, (req, res) => {
     res.send("success");
 });
 
-// 🌊 Zero-RAM Stream Engine + Deep File Inspection (อัปเกรดความปลอดภัยแล้ว)
+// 🌊 Zero-RAM Stream Engine (แก้ไขบัคผู้เล่นอัปโหลดไม่ผ่านแล้ว)
 app.put('/api/avatar', authMiddleware, async (req, res) => {
     const userInfo = req.userInfo;
     userInfo.lastAccess = Date.now(); 
@@ -452,22 +450,11 @@ app.put('/api/avatar', authMiddleware, async (req, res) => {
     const hash = crypto.createHash('sha256');
     
     let uploadedBytes = 0;
-    let isHeaderChecked = false;
-    let isValidFormat = false;
 
     const processStream = new Transform({
         transform(chunk, encoding, callback) {
             uploadedBytes += chunk.length;
             
-            // 🔒 Magic Number Check: ตรวจสอบว่าเป็นไฟล์ ZIP (.moon) จริงๆ หรือไม่
-            if (!isHeaderChecked) {
-                if (chunk.length >= 2 && chunk[0] === 0x50 && chunk[1] === 0x4B) { // 'PK'
-                    isValidFormat = true;
-                }
-                isHeaderChecked = true;
-                if (!isValidFormat) return callback(new Error('INVALID_FORMAT'));
-            }
-
             if (uploadedBytes > LIMIT_BYTES) {
                 return callback(new Error('LIMIT_EXCEEDED'));
             }
@@ -502,11 +489,6 @@ app.put('/api/avatar', authMiddleware, async (req, res) => {
         res.send("success"); 
     } catch (err) {
         await fsp.unlink(tempFile).catch(()=>{});
-        
-        if (err.message === 'INVALID_FORMAT') {
-            sendToDiscord(`🚨 **[Security]** ผู้เล่น \`${userInfo.username}\` พยายามอัปโหลดไฟล์ปลอมที่ไม่ใช่ .moon`);
-            return res.status(415).send({ error: "Unsupported Media Type (Only .moon allowed)" });
-        }
         
         if (err.message === 'LIMIT_EXCEEDED') {
             let strikes = (spamTracker.get(userInfo.username) || 0) + 1;
@@ -584,7 +566,7 @@ app.use((err, req, res, next) => {
 });
 
 // ==========================================
-// ⚡ WEBSOCKET (V25 APEX ENGINE)
+// ⚡ WEBSOCKET (V25 APEX ENGINE - STABILITY PATCH)
 // ==========================================
 const server = http.createServer(app);
 server.keepAliveTimeout = 120000;  
@@ -594,7 +576,9 @@ const wss = new WebSocket.Server({ server, perMessageDeflate: false, maxPayload:
 
 const FREE_RAM_MB = Math.floor(os.freemem() / 1024 / 1024);
 const MAX_WS = Math.max(500, Math.min(5000, Math.floor(FREE_RAM_MB / 1.5))); 
-const RATE_LIMIT_WS_MSGS = 50; 
+
+const RATE_LIMIT_WS_MSGS = 150; // กันกระตุก (แค่เมินแพ็กเกจ)
+const KICK_LIMIT_WS_MSGS = 600; // กันยิงเซิร์ฟ (เตะออกจริงๆ)
 
 setInterval(() => { wss.clients.forEach(ws => { ws.msgCount = 0; }); }, 1000);
 
@@ -609,14 +593,16 @@ wss.on('connection', (ws) => {
     
     const authTimeout = setTimeout(() => {
         if (!ws.isAuthenticated) ws.terminate();
-    }, 5000);
+    }, 15000);
 
     ws.on('pong', () => { ws.isAlive = true; ws.missedPings = 0; }); 
 
     ws.on('message', (data) => {
         try {
             ws.msgCount++;
-            if (ws.msgCount > RATE_LIMIT_WS_MSGS) return ws.terminate(); 
+            
+            if (ws.msgCount > KICK_LIMIT_WS_MSGS) return ws.terminate(); 
+            if (ws.msgCount > RATE_LIMIT_WS_MSGS) return; 
 
             if (!Buffer.isBuffer(data) || data.length < 1 || data.length > 1048576) return; 
 
@@ -710,7 +696,7 @@ const shutdown = () => {
     if (redisPub) redisPub.quit();
     if (redisSub) redisSub.quit();
     saveStatsDB();
-    if (db) db.close(); // ปิด DB ตอน Shutdown
+    if (db) db.close(); 
     
     wss.close(() => { server.close(() => { logger.info(`${c.g}✅ ปิดเซิร์ฟเวอร์เสร็จสมบูรณ์${c.rst}`); process.exit(0); }); });
 };
@@ -718,12 +704,12 @@ process.on('SIGTERM', shutdown); process.on('SIGINT', shutdown);
 
 server.listen(PORT, '0.0.0.0', () => {
     logger.info(`\n${c.p}==========================================${c.rst}`);
-    logger.info(`${c.b}✨ BIGAVATAR CLOUD (V25 APEX ARCHITECTURE)${c.rst}`);
+    logger.info(`${c.b}✨ faydarcloud )${c.rst}`);
     logger.info(`${c.g}✅ DotEnv Loaded Securely${c.rst}`);
     logger.info(`${c.g}🌍 Server Region: ${currentZone.name} ${currentZone.mcFlag}${c.rst}`);
     logger.info(`${redisPub ? c.g + '🔗 Redis Connected (Cluster Ready)' : c.y + '⚠️ No Redis (Running in Single Node Mode)'}${c.rst}`);
     logger.info(`${c.y}🌊 Zero-RAM Stream Upload Engine: ACTIVE${c.rst}`);
-    logger.info(`${c.y}🛡️ Deep File Inspection (Anti-Fake File): ACTIVE${c.rst}`);
+    logger.info(`${c.y}🛡️ Stability Patch (Anti-Kick): ACTIVE${c.rst}`);
     logger.info(`${c.y}💾 SQLite Database System: ACTIVE${c.rst}`);
     logger.info(`${c.p}==========================================${c.rst}\n`);
     
