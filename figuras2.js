@@ -1,4 +1,4 @@
-require('dotenv').config(); // 🔐 โหลด .env
+require('dotenv').config(); 
 const express = require('express');
 const http = require('http'); 
 const https = require('https');
@@ -16,7 +16,6 @@ const os = require('os');
 const { EventEmitter } = require('events');
 const Redis = require('ioredis');
 
-// 🌟 [ENTERPRISE SECURITY MODULES]
 const helmet = require('helmet');
 const compression = require('compression');
 const hpp = require('hpp');
@@ -46,7 +45,7 @@ process.on('unhandledRejection', (reason) => { logger.error(`${c.r}[Promise Prot
 // ⚙️ SERVER CONFIG (DYNAMIC WEB CONFIG)
 // ==========================================
 const PORT = process.env.PORT || 80; 
-let LIMIT_BYTES = 50 * 1024 * 1024; // เปลี่ยนเป็น let เพื่อให้เว็บคุมได้
+let LIMIT_BYTES = 50 * 1024 * 1024; 
 const ENABLE_WHITELIST = true; 
 const TOKEN_MAX_AGE_MS = 12 * 60 * 60 * 1000; 
 let UPLOAD_COOLDOWN_MS = 3 * 1000; 
@@ -68,24 +67,27 @@ const ZONE_INFO = {
 
 const currentZone = ZONE_INFO[SERVER_ZONE] || ZONE_INFO["TH"];
 const formatMB = (bytes) => (bytes / 1024 / 1024).toFixed(0);
+
+// 🛠️ แก้ไข: ลบ ms ซ้ำซ้อนออก
 const getPingText = (ping) => {
-  if (ping < 20) return "§a<20 ms";
+  if (ping < 20) return "§a< 20 ms"; 
   if (ping < 50) return "§e" + ping + " ms";
   return "§c" + ping + " ms";
 };
 
+// 🛠️ แก้ไข: จัด Layout MOTD ให้ตรงกับรูปภาพของคุณเป๊ะๆ
 const generateMotd = () => {
     return `§b╔══════════════════════════════════════╗§r\n` +
-           `§b║     §3§l${MOTD_TITLE.padEnd(14)} §f§lCLOUD §7☁      §b║§r\n` +
+           `§b║     §3§l${MOTD_TITLE} §f§lCLOUD §7☁      §b║§r\n` +
            `§b╠══════════════════════════════════════╣§r\n` +
-           `§b║ §a● §fสถานะ: §aออนไลน์ §7┃ §d💾 §fไฟล์: §d${formatMB(LIMIT_BYTES)}MB §b║§r\n` +
+           `§b║ §a● §fสถานะ: §aออนไลน์ §7| §d💾 §fไฟล์: §d${formatMB(LIMIT_BYTES)}MB §b║§r\n` +
            `§b║ §e⚑ §fโซน: §e${currentZone.mcFlag} ${currentZone.name} §7(${getPingText(currentZone.ping)}) §b║§r\n` +
            `§b╠══════════════════════════════════════╣§r\n` +
            `§b║ §7🚀 §fSpeed: §aHigh Performance     §b║§r\n` +
-           `§b║ §7🛡️ §fStability: §aAnti-Drop Engine §b║§r\n` +
+           `§b║ §7🔒 §fSecurity: §a100% Protected    §b║§r\n` +
            `§b║ §7📦 §fStorage: §eUnlimited Ready    §b║§r\n` +
            `§b╠══════════════════════════════════════╣§r\n` +
-           `§b║ §d✨ §f${MOTD_SUBTITLE.padEnd(20)} §b║§r\n` +
+           `§b║ §d✨ §f${MOTD_SUBTITLE} §b║§r\n` +
            `§b╚══════════════════════════════════════╝§r`;
 };
 
@@ -277,7 +279,7 @@ setInterval(async () => {
     } catch (e) {}
 }, 60 * 60 * 1000);
 
-// ⚡ Sync อัจฉริยะ (ดึงค่าตั้งค่าจาก Web)
+// 🚀 [เชื่อมระบบ] Sync อัจฉริยะรับค่า Settings จาก Web!
 const syncInterval = setInterval(async () => {
     if (isSyncing) return; 
     isSyncing = true;
@@ -299,7 +301,7 @@ const syncInterval = setInterval(async () => {
                 UPLOAD_COOLDOWN_MS = res.data.settings.cooldown_sec * 1000;
                 MOTD_TITLE = res.data.settings.motd_title || "FAYDAR";
                 MOTD_SUBTITLE = res.data.settings.motd_subtitle || "Welcome FayDarCloud";
-                MOTD_MESSAGE = generateMotd(); // รีเฟรชข้อความต้อนรับ
+                MOTD_MESSAGE = generateMotd(); // อัปเดต MOTD ใหม่แบบสดๆ
             }
         }
 
@@ -364,6 +366,7 @@ app.get('/api/server-stats', (req, res) => {
 
 app.get('/api/motd', (req, res) => res.status(200).send(MOTD_MESSAGE));
 app.get('/api/version', (req, res) => res.json({"release":"0.1.5", "prerelease":"0.1.5"}));
+// 🚀 อัปเดต MaxUpload ให้ Client รู้
 app.get('/api/limits', (req, res) => res.json({"rate": { "pingSize": 1048576, "pingRate": 4096, "equip": 0, "download": 999999999999, "upload": 99999999999 }, "limits": { "maxAvatarSize": LIMIT_BYTES, "maxAvatars": 100, "allowedBadges": { "special": Array(15).fill(0), "pride": Array(30).fill(0) } }}));
 
 app.get('/api/auth/id', (req, res) => {
@@ -421,7 +424,7 @@ app.post('/api/equip', authMiddleware, (req, res) => {
     req.userInfo.hexUuidBuffer.copy(buffer, 1); 
     
     broadcastGlobal(req.userInfo.uuid, buffer); 
-    res.status(200).send("success"); // แก้ปัญหา Error Avatar Client Mod
+    res.send("success"); // แก้ปัญหา Error Avatar Client Mod
 });
 
 const handleAvatarUpload = async (req, res) => {
@@ -475,7 +478,7 @@ const handleAvatarUpload = async (req, res) => {
         userInfo.hexUuidBuffer.copy(buffer, 1); 
         broadcastGlobal(userInfo.uuid, buffer); 
         
-        // 🛠️ แก้ไข: เพื่อลดบั๊ก "Error on uploading Avatar" จากตัว Mod บางเวอร์ชันที่อ่าน JSON ไม่ได้ ให้ส่ง Text กลับไปแทน
+        // 🛠️ ส่ง Text ธรรมดาแก้ปัญหา Mod JSON Parsing Error ในเกม
         res.status(200).send("success"); 
     } catch (err) {
         await fsp.unlink(tempFile).catch(()=>{});
@@ -707,5 +710,5 @@ server.listen(PORT, '0.0.0.0', () => {
     logger.info(`${c.y}💾 SQLite Database System: ACTIVE${c.rst}`);
     logger.info(`${c.p}==========================================${c.rst}\n`);
     
-    sendToDiscord(`🚀 **[SYSTEM START]** ระบบ Figura พร้อมใช้งานแล้ว!`);
+    sendToDiscord(`🚀 **[SYSTEM START]** ระบบ Figura พร้อมใช้งานแล้ว! `);
 });
