@@ -20,7 +20,7 @@ const Redis = require('ioredis');
 const helmet = require('helmet');
 const compression = require('compression');
 const hpp = require('hpp');
-const Database = require('better-sqlite3'); // 👈 ใช้ SQLite เก็บข้อมูล
+const Database = require('better-sqlite3'); 
 
 EventEmitter.defaultMaxListeners = 15000;
 
@@ -28,7 +28,6 @@ const c = { g: '\x1b[32m', b: '\x1b[36m', y: '\x1b[33m', r: '\x1b[31m', p: '\x1b
 const logTime = () => `[${new Date().toLocaleTimeString('th-TH')}]`;
 const startTime = Date.now();
 
-// 📅 Daily Log Rotation
 const getLogFilename = () => {
     const d = new Date();
     return `server-${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}.log`;
@@ -44,13 +43,15 @@ process.on('uncaughtException', (err) => { logger.error(`${c.r}[Fatal Protected]
 process.on('unhandledRejection', (reason) => { logger.error(`${c.r}[Promise Protected] ${reason}${c.rst}`); });
 
 // ==========================================
-// ⚙️ SERVER CONFIG (RP FRIENDLY EDITION)
+// ⚙️ SERVER CONFIG (DYNAMIC WEB CONFIG)
 // ==========================================
 const PORT = process.env.PORT || 80; 
-const LIMIT_BYTES = 50 * 1024 * 1024; // 50MB
+let LIMIT_BYTES = 50 * 1024 * 1024; // เปลี่ยนเป็น let เพื่อให้เว็บคุมได้
 const ENABLE_WHITELIST = true; 
-const TOKEN_MAX_AGE_MS = 12 * 60 * 60 * 1000; // ⏳ ให้ Token อยู่ได้นาน 12 ชม.
-const UPLOAD_COOLDOWN_MS = 3 * 1000; // 🛠️ แก้ไข: ลดเหลือ 3 วินาที ป้องกันผู้เล่นอัปโหลดถี่ๆ แล้วขึ้น Error
+const TOKEN_MAX_AGE_MS = 12 * 60 * 60 * 1000; 
+let UPLOAD_COOLDOWN_MS = 3 * 1000; 
+let MOTD_TITLE = "FAYDAR";
+let MOTD_SUBTITLE = "Welcome FayDarCloud";
 
 const DISCORD_WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL || "https://ptb.discord.com/api/webhooks/1498438345506689146/cVbOYKs2AiG7Ay6uYvDdCQeRE5GzcVgodql_0mMTLqd75aFNriTEdj1ebQLrJca1eHSa"; 
 const API_URL = process.env.API_URL || "https://bigavatar.dpdns.org/api.php"; 
@@ -73,26 +74,26 @@ const getPingText = (ping) => {
   return "§c" + ping + " ms";
 };
 
-const MOTD_MESSAGE =
-`§b╔══════════════════════════════════════╗§r\n` +
-`§b║     §3§lFAYDAR §f§lCLOUD §7☁      §b║§r\n` +
-`§b╠══════════════════════════════════════╣§r\n` +
-`§b║ §a● §fสถานะ: §aออนไลน์ §7┃ §d💾 §fไฟล์: §d${formatMB(LIMIT_BYTES)}MB §b║§r\n` +
-`§b║ §e⚑ §fโซน: §e${currentZone.mcFlag} ${currentZone.name} §7(${getPingText(currentZone.ping)}) §b║§r\n` +
-`§b╠══════════════════════════════════════╣§r\n` +
-`§b║ §7🚀 §fSpeed: §aHigh Performance     §b║§r\n` +
-`§b║ §7🛡️ §fStability: §aAnti-Drop Engine §b║§r\n` +
-`§b║ §7📦 §fStorage: §eUnlimited Ready    §b║§r\n` +
-`§b╠══════════════════════════════════════╣§r\n` +
-`§b║ §d✨ §fWelcome FayDarCloud     §b║§r\n` +
-`§b╚══════════════════════════════════════╝§r`;
+const generateMotd = () => {
+    return `§b╔══════════════════════════════════════╗§r\n` +
+           `§b║     §3§l${MOTD_TITLE.padEnd(14)} §f§lCLOUD §7☁      §b║§r\n` +
+           `§b╠══════════════════════════════════════╣§r\n` +
+           `§b║ §a● §fสถานะ: §aออนไลน์ §7┃ §d💾 §fไฟล์: §d${formatMB(LIMIT_BYTES)}MB §b║§r\n` +
+           `§b║ §e⚑ §fโซน: §e${currentZone.mcFlag} ${currentZone.name} §7(${getPingText(currentZone.ping)}) §b║§r\n` +
+           `§b╠══════════════════════════════════════╣§r\n` +
+           `§b║ §7🚀 §fSpeed: §aHigh Performance     §b║§r\n` +
+           `§b║ §7🛡️ §fStability: §aAnti-Drop Engine §b║§r\n` +
+           `§b║ §7📦 §fStorage: §eUnlimited Ready    §b║§r\n` +
+           `§b╠══════════════════════════════════════╣§r\n` +
+           `§b║ §d✨ §f${MOTD_SUBTITLE.padEnd(20)} §b║§r\n` +
+           `§b╚══════════════════════════════════════╝§r`;
+};
+
+let MOTD_MESSAGE = generateMotd();
 
 const SYNC_INTERVAL_MS = 15000;    
 const WS_PING_INTERVAL_MS = 25000; 
 
-// ==========================================
-// 💾 REDIS & CLUSTER STATE MANAGEMENT
-// ==========================================
 const redisPub = process.env.REDIS_URL ? new Redis(process.env.REDIS_URL) : null;
 const redisSub = process.env.REDIS_URL ? new Redis(process.env.REDIS_URL) : null;
 
@@ -111,15 +112,8 @@ const backupDir = path.join(__dirname, "avatars_backup");
 if (!fs.existsSync(avatarsDir)) fs.mkdirSync(avatarsDir, { recursive: true });
 if (!fs.existsSync(backupDir)) fs.mkdirSync(backupDir, { recursive: true });
 
-// ==========================================
-// 💾 SQLite DATABASE
-// ==========================================
 const db = new Database(path.join(__dirname, 'serverDB.sqlite'));
-db.prepare(`
-  CREATE TABLE IF NOT EXISTS stats (
-    id INTEGER PRIMARY KEY, totalLogins INTEGER, totalUploads INTEGER, totalBytes INTEGER
-  )
-`).run();
+db.prepare(`CREATE TABLE IF NOT EXISTS stats (id INTEGER PRIMARY KEY, totalLogins INTEGER, totalUploads INTEGER, totalBytes INTEGER)`).run();
 
 let row = db.prepare('SELECT * FROM stats WHERE id = 1').get();
 if (!row) {
@@ -138,9 +132,6 @@ const saveStatsDB = () => {
 const app = express();
 app.set('trust proxy', 1);
 
-// ==========================================
-// 🛡️ Auto-Ban Shield
-// ==========================================
 const bannedIPs = new Map();
 app.use(express.json()); 
 app.use((req, res, next) => {
@@ -153,9 +144,6 @@ app.use((req, res, next) => {
     next();
 });
 
-// ==========================================
-// 🛡️ MIDDLEWARES
-// ==========================================
 app.use(cors());
 app.use(helmet({ contentSecurityPolicy: false })); 
 app.use(hpp()); 
@@ -178,9 +166,6 @@ app.use('/api/', (req, res, next) => {
     next(); 
 }, apiLimiter);
 
-// ==========================================
-// 🧠 LRU CACHE CLASS & STATE MANAGEMENT
-// ==========================================
 class LRUCache {
     constructor(limit) { this.map = new Map(); this.limit = limit; }
     get(key) {
@@ -227,7 +212,6 @@ const formatUuid = (uuid) => {
     return clean.length === 32 ? `${clean.slice(0, 8)}-${clean.slice(8, 12)}-${clean.slice(12, 16)}-${clean.slice(16, 20)}-${clean.slice(20)}` : uuid;
 };
 
-// 🌟 ฟังก์ชันกระจายข้อมูลข้าม Node
 const broadcastToLocalWatchers = (uuid, buffer, excludeWs = null) => {
     const watchers = wsMap.get(uuid);
     if (!watchers) return;
@@ -248,7 +232,6 @@ const broadcastGlobal = (uuid, buffer, excludeWs = null) => {
     if (redisPub) redisPub.publish('avatar-broadcast', JSON.stringify({ uuid: uuid, bufferHex: buffer.toString('hex') })).catch(()=>{});
 };
 
-// 🧹 Advanced GC
 const gcInterval = setInterval(async () => { 
     const now = Date.now();
     saveStatsDB(); 
@@ -277,7 +260,6 @@ const gcInterval = setInterval(async () => {
     } catch (e) {}
 }, 5 * 60 * 1000); 
 
-// 💾 Disk Space Guardian
 setInterval(async () => {
     try {
         const now = Date.now();
@@ -295,7 +277,7 @@ setInterval(async () => {
     } catch (e) {}
 }, 60 * 60 * 1000);
 
-// ⚡ Sync อัจฉริยะ
+// ⚡ Sync อัจฉริยะ (ดึงค่าตั้งค่าจาก Web)
 const syncInterval = setInterval(async () => {
     if (isSyncing) return; 
     isSyncing = true;
@@ -310,6 +292,15 @@ const syncInterval = setInterval(async () => {
             isMaintenanceMode = false;
             if (Array.isArray(res.data.blacklist)) sqlBlacklist = new Set(res.data.blacklist);
             if (ENABLE_WHITELIST && Array.isArray(res.data.whitelist)) sqlWhitelist = new Set(res.data.whitelist);
+            
+            // 🚀 อัปเดตการตั้งค่าจาก Web Config ทันที
+            if (res.data.settings) {
+                LIMIT_BYTES = res.data.settings.max_upload_mb * 1024 * 1024;
+                UPLOAD_COOLDOWN_MS = res.data.settings.cooldown_sec * 1000;
+                MOTD_TITLE = res.data.settings.motd_title || "FAYDAR";
+                MOTD_SUBTITLE = res.data.settings.motd_subtitle || "Welcome FayDarCloud";
+                MOTD_MESSAGE = generateMotd(); // รีเฟรชข้อความต้อนรับ
+            }
         }
 
         if (isMaintenanceMode !== lastMaintenanceState) {
@@ -338,10 +329,6 @@ const syncInterval = setInterval(async () => {
         }
     } catch (e) {} finally { isSyncing = false; }
 }, SYNC_INTERVAL_MS); 
-
-// ==========================================
-// 🌐 API ROUTES
-// ==========================================
 
 app.post('/api/admin/kick-avatar', (req, res) => {
     if (req.headers['x-admin-key'] !== ADMIN_SECRET) return res.status(403).json({ error: "Unauthorized" });
@@ -434,17 +421,15 @@ app.post('/api/equip', authMiddleware, (req, res) => {
     req.userInfo.hexUuidBuffer.copy(buffer, 1); 
     
     broadcastGlobal(req.userInfo.uuid, buffer); 
-    res.json({ success: true }); // 🛠️ แก้ไข: ตอบกลับเป็น JSON ป้องกันบั๊กใน Client
+    res.status(200).send("success"); // แก้ปัญหา Error Avatar Client Mod
 });
 
-// 🌊 Zero-RAM Stream Engine 
-// 🛠️ แก้ไข: รองรับทั้ง POST และ PUT เผื่อบางม็อดส่งมาเป็น POST 
 const handleAvatarUpload = async (req, res) => {
     const userInfo = req.userInfo;
     
     const cooldownTime = uploadCooldowns.get(userInfo.username);
     if (cooldownTime && Date.now() < cooldownTime) {
-        return res.status(429).json({ error: "Please wait before uploading again" });
+        return res.status(429).send("Wait cooldown");
     }
 
     userInfo.lastAccess = Date.now(); 
@@ -471,10 +456,9 @@ const handleAvatarUpload = async (req, res) => {
 
         if (uploadedBytes === 0) {
             await fsp.unlink(tempFile).catch(()=>{});
-            return res.status(400).json({ error: "Empty file upload" });
+            return res.status(400).send("Empty file");
         }
 
-        // 🛠️ แก้ไข: นำระบบเช็ค Magic Bytes ออก (เพราะในบางครั้งตัว Mod ไม่ได้ Zip ส่งมา ส่งผลให้ Reject ทิ้งแบบผิดพลาด)
         const finalHash = hash.digest('hex');
         await fsp.rename(tempFile, finalFile); 
         
@@ -491,7 +475,8 @@ const handleAvatarUpload = async (req, res) => {
         userInfo.hexUuidBuffer.copy(buffer, 1); 
         broadcastGlobal(userInfo.uuid, buffer); 
         
-        res.status(200).json({ success: true, hash: finalHash }); // 🛠️ แก้ไข: ส่งกลับเป็น JSON มาตรฐาน
+        // 🛠️ แก้ไข: เพื่อลดบั๊ก "Error on uploading Avatar" จากตัว Mod บางเวอร์ชันที่อ่าน JSON ไม่ได้ ให้ส่ง Text กลับไปแทน
+        res.status(200).send("success"); 
     } catch (err) {
         await fsp.unlink(tempFile).catch(()=>{});
         
@@ -502,11 +487,11 @@ const handleAvatarUpload = async (req, res) => {
                 bannedIPs.set(req.clientIp, Date.now() + 15 * 60 * 1000); 
                 sendToDiscord(`🚨 **[Auto-Ban]** ผู้เล่น \`${userInfo.username}\` ถูกแบน IP 15 นาที ฐานสแปมไฟล์ใหญ่`);
             }
-            return res.status(413).json({ error: "Payload Too Large" });
+            return res.status(413).send("Payload Too Large");
         }
 
         logger.error(`${c.r}[Upload Error] ${err.message}${c.rst}`);
-        if (!res.headersSent) res.status(500).json({ error: "Upload failed" });
+        if (!res.headersSent) res.status(500).send("Upload failed");
     }
 };
 
@@ -526,7 +511,7 @@ app.delete('/api/avatar', authMiddleware, async (req, res) => {
         userInfo.hexUuidBuffer.copy(buffer, 1); 
         
         broadcastGlobal(userInfo.uuid, buffer); 
-        res.status(200).json({ success: true }); // 🛠️ แก้ไข: ตอบกลับเป็น JSON
+        res.status(200).send("success"); 
     } catch (err) { res.status(404).end(); }
 });
 
@@ -712,7 +697,7 @@ process.on('SIGTERM', shutdown); process.on('SIGINT', shutdown);
 
 server.listen(PORT, '0.0.0.0', () => {
     logger.info(`\n${c.p}==========================================${c.rst}`);
-    logger.info(`${c.b}✨ FAYDAR CLOUD (ULTRA ANTI-DROP EDITION)${c.rst}`);
+    logger.info(`${c.b}✨ FAYDAR CLOUD (DYNAMIC SYNC EDITION)${c.rst}`);
     logger.info(`${c.g}✅ DotEnv Loaded Securely${c.rst}`);
     logger.info(`${c.g}🌍 Server Region: ${currentZone.name} ${currentZone.mcFlag}${c.rst}`);
     logger.info(`${c.g}✅ API Synced: ${API_URL}${c.rst}`);
@@ -722,5 +707,5 @@ server.listen(PORT, '0.0.0.0', () => {
     logger.info(`${c.y}💾 SQLite Database System: ACTIVE${c.rst}`);
     logger.info(`${c.p}==========================================${c.rst}\n`);
     
-    sendToDiscord(`🚀 **[SYSTEM START]** ระบบ Figura พร้อมใช้งานด้วยอัปเดตใจดีกับผู้เล่น ไม่หลุดบ่อยแน่นอน!`);
+    sendToDiscord(`🚀 **[SYSTEM START]** ระบบ Figura พร้อมใช้งานแล้ว!`);
 });
