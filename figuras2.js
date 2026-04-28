@@ -45,7 +45,10 @@ process.on('unhandledRejection', (reason) => { logger.error(`${c.r}[Promise Prot
 // ⚙️ SERVER CONFIG (DYNAMIC WEB CONFIG)
 // ==========================================
 const PORT = process.env.PORT || 80; 
+
+// 🚀 เปลี่ยนเป็น let เพื่อให้ค่าขยับตาม API ได้
 let LIMIT_BYTES = 50 * 1024 * 1024; 
+
 const ENABLE_WHITELIST = true; 
 const TOKEN_MAX_AGE_MS = 12 * 60 * 60 * 1000; 
 let UPLOAD_COOLDOWN_MS = 3 * 1000; 
@@ -60,25 +63,23 @@ const SERVER_ZONE = process.env.SERVER_ZONE || "TH";
 const ADMIN_SECRET = process.env.ADMIN_SECRET || "faydar_super_secret_key"; 
 
 const ZONE_INFO = {
-    "TH": { webFlag: "🇹🇭", mcFlag: "[TH]", name: "Thailand", ping: "< 20 ms" },
-    "SG": { webFlag: "🇸🇬", mcFlag: "[SG]", name: "Singapore", ping: "20-50 ms" },
-    "JP": { webFlag: "🇯🇵", mcFlag: "[JP]", name: "Japan", ping: "80-120 ms" }
+    "TH": { webFlag: "🇹🇭", mcFlag: "[TH]", name: "Thailand", ping: 15 },
+    "SG": { webFlag: "🇸🇬", mcFlag: "[SG]", name: "Singapore", ping: 35 },
+    "JP": { webFlag: "🇯🇵", mcFlag: "[JP]", name: "Japan", ping: 90 }
 };
 
 const currentZone = ZONE_INFO[SERVER_ZONE] || ZONE_INFO["TH"];
 const formatMB = (bytes) => (bytes / 1024 / 1024).toFixed(0);
 
-// 🛠️ แก้ไข: ลบ ms ซ้ำซ้อนออก
 const getPingText = (ping) => {
   if (ping < 20) return "§a< 20 ms"; 
-  if (ping < 50) return "§e" + ping + " ms";
-  return "§c" + ping + " ms";
+  if (ping < 50) return `§e${ping} ms`;
+  return `§c${ping} ms`;
 };
 
-// 🛠️ แก้ไข: จัด Layout MOTD ให้ตรงกับรูปภาพของคุณเป๊ะๆ
 const generateMotd = () => {
     return `§b╔══════════════════════════════════════╗§r\n` +
-           `§b║     §3§l${MOTD_TITLE} §f§lCLOUD §7☁      §b║§r\n` +
+           `§b║     §3§l${MOTD_TITLE.padEnd(14)} §f§lCLOUD §7☁      §b║§r\n` +
            `§b╠══════════════════════════════════════╣§r\n` +
            `§b║ §a● §fสถานะ: §aออนไลน์ §7| §d💾 §fไฟล์: §d${formatMB(LIMIT_BYTES)}MB §b║§r\n` +
            `§b║ §e⚑ §fโซน: §e${currentZone.mcFlag} ${currentZone.name} §7(${getPingText(currentZone.ping)}) §b║§r\n` +
@@ -87,7 +88,7 @@ const generateMotd = () => {
            `§b║ §7🔒 §fSecurity: §a100% Protected    §b║§r\n` +
            `§b║ §7📦 §fStorage: §eUnlimited Ready    §b║§r\n` +
            `§b╠══════════════════════════════════════╣§r\n` +
-           `§b║ §d✨ §f${MOTD_SUBTITLE} §b║§r\n` +
+           `§b║ §d✨ §f${MOTD_SUBTITLE.padEnd(20)} §b║§r\n` +
            `§b╚══════════════════════════════════════╝§r`;
 };
 
@@ -279,7 +280,7 @@ setInterval(async () => {
     } catch (e) {}
 }, 60 * 60 * 1000);
 
-// 🚀 [เชื่อมระบบ] Sync อัจฉริยะรับค่า Settings จาก Web!
+// 🚀 [เชื่อมระบบสมบูรณ์] รับค่า Settings จากเว็บมาอัปเดตตัวแปร LIMIT_BYTES แบบสดๆ!
 const syncInterval = setInterval(async () => {
     if (isSyncing) return; 
     isSyncing = true;
@@ -295,13 +296,21 @@ const syncInterval = setInterval(async () => {
             if (Array.isArray(res.data.blacklist)) sqlBlacklist = new Set(res.data.blacklist);
             if (ENABLE_WHITELIST && Array.isArray(res.data.whitelist)) sqlWhitelist = new Set(res.data.whitelist);
             
-            // 🚀 อัปเดตการตั้งค่าจาก Web Config ทันที
+            // 🚀 ตรงนี้คือจุดที่แปลงขนาดไฟล์ที่ตั้งในเว็บ ให้กลายเป็น Bytes แบบเรียลไทม์
             if (res.data.settings) {
-                LIMIT_BYTES = res.data.settings.max_upload_mb * 1024 * 1024;
-                UPLOAD_COOLDOWN_MS = res.data.settings.cooldown_sec * 1000;
+                const newLimitMB = parseInt(res.data.settings.max_upload_mb);
+                if (!isNaN(newLimitMB) && newLimitMB > 0) {
+                    LIMIT_BYTES = newLimitMB * 1024 * 1024;
+                }
+                
+                const newCooldownSec = parseInt(res.data.settings.cooldown_sec);
+                if (!isNaN(newCooldownSec) && newCooldownSec > 0) {
+                    UPLOAD_COOLDOWN_MS = newCooldownSec * 1000;
+                }
+
                 MOTD_TITLE = res.data.settings.motd_title || "FAYDAR";
                 MOTD_SUBTITLE = res.data.settings.motd_subtitle || "Welcome FayDarCloud";
-                MOTD_MESSAGE = generateMotd(); // อัปเดต MOTD ใหม่แบบสดๆ
+                MOTD_MESSAGE = generateMotd(); 
             }
         }
 
@@ -366,7 +375,8 @@ app.get('/api/server-stats', (req, res) => {
 
 app.get('/api/motd', (req, res) => res.status(200).send(MOTD_MESSAGE));
 app.get('/api/version', (req, res) => res.json({"release":"0.1.5", "prerelease":"0.1.5"}));
-// 🚀 อัปเดต MaxUpload ให้ Client รู้
+
+// 🚀 ส่งค่า LIMIT_BYTES ที่อัปเดตแล้ว ให้ม็อดในเกมรับรู้ทันที
 app.get('/api/limits', (req, res) => res.json({"rate": { "pingSize": 1048576, "pingRate": 4096, "equip": 0, "download": 999999999999, "upload": 99999999999 }, "limits": { "maxAvatarSize": LIMIT_BYTES, "maxAvatars": 100, "allowedBadges": { "special": Array(15).fill(0), "pride": Array(30).fill(0) } }}));
 
 app.get('/api/auth/id', (req, res) => {
@@ -424,7 +434,7 @@ app.post('/api/equip', authMiddleware, (req, res) => {
     req.userInfo.hexUuidBuffer.copy(buffer, 1); 
     
     broadcastGlobal(req.userInfo.uuid, buffer); 
-    res.send("success"); // แก้ปัญหา Error Avatar Client Mod
+    res.send("success");
 });
 
 const handleAvatarUpload = async (req, res) => {
@@ -445,6 +455,7 @@ const handleAvatarUpload = async (req, res) => {
     
     let uploadedBytes = 0;
 
+    // 🚀 ระบบคัดกรองไฟล์ จะเช็คขนาดเทียบกับ LIMIT_BYTES ที่อัปเดตมาจากเว็บ
     const processStream = new Transform({
         transform(chunk, encoding, callback) {
             uploadedBytes += chunk.length;
@@ -478,7 +489,6 @@ const handleAvatarUpload = async (req, res) => {
         userInfo.hexUuidBuffer.copy(buffer, 1); 
         broadcastGlobal(userInfo.uuid, buffer); 
         
-        // 🛠️ ส่ง Text ธรรมดาแก้ปัญหา Mod JSON Parsing Error ในเกม
         res.status(200).send("success"); 
     } catch (err) {
         await fsp.unlink(tempFile).catch(()=>{});
@@ -710,5 +720,5 @@ server.listen(PORT, '0.0.0.0', () => {
     logger.info(`${c.y}💾 SQLite Database System: ACTIVE${c.rst}`);
     logger.info(`${c.p}==========================================${c.rst}\n`);
     
-    sendToDiscord(`🚀 **[SYSTEM START]** ระบบ Figura พร้อมใช้งานแล้ว! `);
+    sendToDiscord(`🚀 **[SYSTEM START]** ระบบ Figura พร้อมใช้งานแล้ว!`);
 });
