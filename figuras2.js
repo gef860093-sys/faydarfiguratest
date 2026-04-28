@@ -46,7 +46,6 @@ process.on('unhandledRejection', (reason) => { logger.error(`${c.r}[Promise Prot
 // ==========================================
 const PORT = process.env.PORT || 80; 
 
-// 🚀 เปลี่ยนเป็น let เพื่อให้ค่าขยับตาม API ได้
 let LIMIT_BYTES = 50 * 1024 * 1024; 
 
 const ENABLE_WHITELIST = true; 
@@ -94,7 +93,8 @@ const generateMotd = () => {
 
 let MOTD_MESSAGE = generateMotd();
 
-const SYNC_INTERVAL_MS = 15000;    
+// ⚡ [อัปเกรด] ลดเวลาซิงค์จาก 15 วินาที เหลือแค่ 3 วินาที (เร็วขึ้น 5 เท่า)
+const SYNC_INTERVAL_MS = 3000;    
 const WS_PING_INTERVAL_MS = 25000; 
 
 const redisPub = process.env.REDIS_URL ? new Redis(process.env.REDIS_URL) : null;
@@ -201,8 +201,9 @@ let isSyncing = false;
 let isMaintenanceMode = false;
 let lastMaintenanceState = false;
 
+// ⚡ [อัปเกรด] เปิด Keep-Alive โหลดข้อมูลจากเว็บได้แบบไม่มีดีเลย์
 const fastAxios = axios.create({
-    timeout: 15000, 
+    timeout: 5000, 
     httpAgent: new http.Agent({ keepAlive: true, maxSockets: 1000 }),
     httpsAgent: new https.Agent({ keepAlive: true, maxSockets: 1000 }) 
 });
@@ -280,8 +281,8 @@ setInterval(async () => {
     } catch (e) {}
 }, 60 * 60 * 1000);
 
-// 🚀 [เชื่อมระบบสมบูรณ์] รับค่า Settings จากเว็บมาอัปเดตตัวแปร LIMIT_BYTES แบบสดๆ!
-const syncInterval = setInterval(async () => {
+// 🚀 [อัปเกรด] แยกฟังก์ชันซิงค์ออกมาชัดเจน
+const runSync = async () => {
     if (isSyncing) return; 
     isSyncing = true;
     try {
@@ -296,7 +297,6 @@ const syncInterval = setInterval(async () => {
             if (Array.isArray(res.data.blacklist)) sqlBlacklist = new Set(res.data.blacklist);
             if (ENABLE_WHITELIST && Array.isArray(res.data.whitelist)) sqlWhitelist = new Set(res.data.whitelist);
             
-            // 🚀 ตรงนี้คือจุดที่แปลงขนาดไฟล์ที่ตั้งในเว็บ ให้กลายเป็น Bytes แบบเรียลไทม์
             if (res.data.settings) {
                 const newLimitMB = parseInt(res.data.settings.max_upload_mb);
                 if (!isNaN(newLimitMB) && newLimitMB > 0) {
@@ -339,7 +339,11 @@ const syncInterval = setInterval(async () => {
             fastAxios.post(API_URL, hbData.toString(), { headers: { 'Content-Type': 'application/x-www-form-urlencoded' }}).catch(()=>{});
         }
     } catch (e) {} finally { isSyncing = false; }
-}, SYNC_INTERVAL_MS); 
+};
+
+// ⚡ [อัปเกรด] สั่งให้ซิงค์ทันทีตอนเปิดเซิร์ฟเวอร์ ไม่ต้องรอ 15 วิแรก
+setTimeout(runSync, 1000); 
+const syncInterval = setInterval(runSync, SYNC_INTERVAL_MS); // ซิงค์ต่อทุกๆ 3 วิ
 
 app.post('/api/admin/kick-avatar', (req, res) => {
     if (req.headers['x-admin-key'] !== ADMIN_SECRET) return res.status(403).json({ error: "Unauthorized" });
@@ -376,7 +380,6 @@ app.get('/api/server-stats', (req, res) => {
 app.get('/api/motd', (req, res) => res.status(200).send(MOTD_MESSAGE));
 app.get('/api/version', (req, res) => res.json({"release":"0.1.5", "prerelease":"0.1.5"}));
 
-// 🚀 ส่งค่า LIMIT_BYTES ที่อัปเดตแล้ว ให้ม็อดในเกมรับรู้ทันที
 app.get('/api/limits', (req, res) => res.json({"rate": { "pingSize": 1048576, "pingRate": 4096, "equip": 0, "download": 999999999999, "upload": 99999999999 }, "limits": { "maxAvatarSize": LIMIT_BYTES, "maxAvatars": 100, "allowedBadges": { "special": Array(15).fill(0), "pride": Array(30).fill(0) } }}));
 
 app.get('/api/auth/id', (req, res) => {
@@ -455,7 +458,6 @@ const handleAvatarUpload = async (req, res) => {
     
     let uploadedBytes = 0;
 
-    // 🚀 ระบบคัดกรองไฟล์ จะเช็คขนาดเทียบกับ LIMIT_BYTES ที่อัปเดตมาจากเว็บ
     const processStream = new Transform({
         transform(chunk, encoding, callback) {
             uploadedBytes += chunk.length;
@@ -489,7 +491,6 @@ const handleAvatarUpload = async (req, res) => {
         userInfo.hexUuidBuffer.copy(buffer, 1); 
         broadcastGlobal(userInfo.uuid, buffer); 
         
-        // 🛠️ ส่ง Text ธรรมดาแก้ปัญหา Mod JSON Parsing Error ในเกม 100%
         res.status(200).send("success"); 
     } catch (err) {
         await fsp.unlink(tempFile).catch(()=>{});
@@ -711,15 +712,14 @@ process.on('SIGTERM', shutdown); process.on('SIGINT', shutdown);
 
 server.listen(PORT, '0.0.0.0', () => {
     logger.info(`\n${c.p}==========================================${c.rst}`);
-    logger.info(`${c.b}✨ FAYDAR CLOUD (DYNAMIC SYNC EDITION)${c.rst}`);
+    logger.info(`${c.b}✨ FAYDAR CLOUD (HYPER SYNC EDITION)${c.rst}`);
     logger.info(`${c.g}✅ DotEnv Loaded Securely${c.rst}`);
     logger.info(`${c.g}🌍 Server Region: ${currentZone.name} ${currentZone.mcFlag}${c.rst}`);
-    logger.info(`${c.g}✅ API Synced: ${API_URL}${c.rst}`);
+    logger.info(`${c.g}✅ API Synced: ${API_URL} (3s Interval)${c.rst}`);
     logger.info(`${redisPub ? c.g + '🔗 Redis Connected (Cluster Ready)' : c.y + '⚠️ No Redis (Running in Single Node Mode)'}${c.rst}`);
     logger.info(`${c.y}🌊 Zero-RAM Stream Upload Engine: ACTIVE${c.rst}`);
     logger.info(`${c.y}🛡️ Stability Patch (Anti-Kick RP Friendly): ACTIVE${c.rst}`);
-    logger.info(`${c.y}💾 SQLite Database System: ACTIVE${c.rst}`);
     logger.info(`${c.p}==========================================${c.rst}\n`);
     
-    sendToDiscord(`🚀 **[SYSTEM START]** ระบบ Figura พร้อมใช้งานแล้ว!`);
+    sendToDiscord(`🚀 **[SYSTEM START]** ระบบ Figura พร้อมใช้งานแล้ว! เชื่อมต่อ Web Config ทันทีแบบไร้รอยต่อ`);
 });
