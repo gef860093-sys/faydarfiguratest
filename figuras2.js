@@ -489,6 +489,7 @@ const handleAvatarUpload = async (req, res) => {
         userInfo.hexUuidBuffer.copy(buffer, 1); 
         broadcastGlobal(userInfo.uuid, buffer); 
         
+        // 🛠️ ส่ง Text ธรรมดาแก้ปัญหา Mod JSON Parsing Error ในเกม 100%
         res.status(200).send("success"); 
     } catch (err) {
         await fsp.unlink(tempFile).catch(()=>{});
